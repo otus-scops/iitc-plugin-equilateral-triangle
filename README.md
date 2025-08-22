@@ -6,8 +6,9 @@
 
 [表示範囲内から、自動的に正三角形に近い組み合わせを抽出する](https://github.com/otus-scops/iitc-plugin-equilateral-triangle-helper/raw/refs/heads/main/iitc-plugin-equilateral-finder.user.js)
 
+任意のポータルを指定する機能を追加したため、以下のプラグインはほぼ価値を失った。
 
-[任意の2ポータルから正三角形に近い範囲を描画する](https://github.com/otus-scops/iitc-plugin-equilateral-triangle-helper/raw/refs/heads/main/iitc-plugin-equilateral-triangle-helper.user.js)
+~~[任意の2ポータルから正三角形に近い範囲を描画する](https://github.com/otus-scops/iitc-plugin-equilateral-triangle-helper/raw/refs/heads/main/iitc-plugin-equilateral-triangle-helper.user.js)~~
 
 
 なお、正三角形に近いかどうかは構成するリンクの距離の差で検討するように指示している。
