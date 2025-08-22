@@ -1,4 +1,4 @@
-# Plus Delta Field Opsの検討用。
+# +Delta Campaign: Fieldの検討用。
 
 ほぼGeminiに作らせた。
 
