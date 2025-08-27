@@ -1,11 +1,11 @@
 // ==UserScript==
-// @id           iitc-plugin-equilateral-finder-with-pivot
-// @name         IITC plugin: Equilateral Triangle Finder (with pivot)
+// @id           iitc-plugin-equilateral-finder
+// @name         IITC plugin: Equilateral Triangle Finder
 // @category     Layer
-// @version      1.2.0
+// @version      1.3.1
 // @namespace    https://github.com/jonatkins/ingress-intel-total-conversion
-// @updateURL    https://raw.githubusercontent.com/IITC-CE/Community-plugins/master/dist/equilateral_finder_pivot/equilateral_finder_pivot.meta.js
-// @downloadURL  https://raw.githubusercontent.com/IITC-CE/Community-plugins/master/dist/equilateral_finder_pivot/equilateral_finder_pivot.user.js
+// @updateURL    https://github.com/otus-scops/iitc-plugin-equilateral-triangle/raw/refs/heads/main/iitc-plugin-equilateral-finder.user.js
+// @downloadURL  https://github.com/otus-scops/iitc-plugin-equilateral-triangle/raw/refs/heads/main/iitc-plugin-equilateral-finder.user.js
 // @description  Finds sets of three portals that can form a nearly equilateral triangle control field, optionally including one or two selected portals.
 // @match        https://intel.ingress.com/*
 // @grant        none
@@ -22,9 +22,9 @@ function wrapper(plugin_info) {
 
   // --- 設定値 (デフォルト) ---
   self.settings = {
-    tolerance: 5,  // 許容誤差 (%)
-    maxResults: 20, // 最大表示件数
-    maxPortals: 500 // 計算対象の最大ポータル数 (起点指定時は多めに)
+    minPercentage: 95, // 最低正三角形度 (%)
+    maxResults: 20,    // 最大表示件数
+    maxPortals: 500    // 計算対象の最大ポータル数 (起点指定時は多めに)
   };
 
   // --- 選択されたポータル ---
@@ -35,7 +35,6 @@ function wrapper(plugin_info) {
 
   // --- メイン処理 ---
   self.findTriangles = function() {
-    // 描画をクリア
     self.drawLayer.clearLayers();
 
     // 1. 表示範囲内のポータルを取得
@@ -52,17 +51,9 @@ function wrapper(plugin_info) {
     }
     
     const pivotCount = self.pivotPortals.length;
-
-    if (pivotCount === 0) { // 全検索
-        if (visiblePortals.length < 3) {
-            alert('正三角形の計算には、少なくとも3つのポータルが画面内に必要です。');
-            return;
-        }
-    } else { // 起点検索
-        if (visiblePortals.length < (3 - pivotCount)) {
-            alert(`起点ポータル${pivotCount}個に加えて、あと${3-pivotCount}個以上のポータルが画面内に必要です。`);
-            return;
-        }
+    if ((pivotCount === 0 && visiblePortals.length < 3) || (pivotCount > 0 && visiblePortals.length < (3 - pivotCount))) {
+        alert('検索を実行するには、画面内にもっと多くのポータルが必要です。');
+        return;
     }
 
     if (visiblePortals.length > self.settings.maxPortals) {
@@ -73,7 +64,6 @@ function wrapper(plugin_info) {
 
     // 2. 組み合わせを計算
     const triangles = [];
-    
     const progressDialog = dialog({
       title: '正三角形を検索中',
       html: `<p>計算中... (${visiblePortals.length}個のポータル)</p>`,
@@ -85,6 +75,7 @@ function wrapper(plugin_info) {
     setTimeout(() => {
       // 検索ロジックの分岐
       if (pivotCount === 0) {
+        // 全検索
         for (let i = 0; i < visiblePortals.length; i++) {
           for (let j = i + 1; j < visiblePortals.length; j++) {
             for (let k = j + 1; k < visiblePortals.length; k++) {
@@ -93,6 +84,7 @@ function wrapper(plugin_info) {
           }
         }
       } else if (pivotCount === 1) {
+        // 起点1つ
         const p1 = window.portals[self.pivotPortals[0].guid];
         for (let i = 0; i < visiblePortals.length; i++) {
           for (let j = i + 1; j < visiblePortals.length; j++) {
@@ -100,6 +92,7 @@ function wrapper(plugin_info) {
           }
         }
       } else if (pivotCount === 2) {
+        // 起点2つ
         const p1 = window.portals[self.pivotPortals[0].guid];
         const p2 = window.portals[self.pivotPortals[1].guid];
         for (let i = 0; i < visiblePortals.length; i++) {
@@ -109,13 +102,16 @@ function wrapper(plugin_info) {
 
       progressDialog.dialog('close');
 
-      triangles.sort((a, b) => a.diff - b.diff);
+      // 3. パーセンテージが高い順（100%に近い順）にソート
+      triangles.sort((a, b) => b.percentage - a.percentage);
+      
+      // 4. 最大件数に絞る & 結果を表示
       const finalResults = triangles.slice(0, self.settings.maxResults);
       self.showResults(finalResults);
     }, 10);
   };
   
-  // 三角形チェックロジックを共通化
+  // 正三角形度を計算し、条件を満たせばリストに追加する関数
   self.checkAndAddTriangle = function(portalSet, triangles) {
       const [p1, p2, p3] = portalSet;
       if (!p1 || !p2 || !p3) return; 
@@ -124,29 +120,39 @@ function wrapper(plugin_info) {
       const pos2 = p2.getLatLng();
       const pos3 = p3.getLatLng();
 
-      const dist12 = pos1.distanceTo(pos2);
-      const dist23 = pos2.distanceTo(pos3);
-      const dist31 = pos3.distanceTo(pos1);
+      // 3辺の長さを計算
+      const a = pos1.distanceTo(pos2);
+      const b = pos2.distanceTo(pos3);
+      const c = pos3.distanceTo(pos1);
 
-      const maxDist = Math.max(dist12, dist23, dist31);
-      const minDist = Math.min(dist12, dist23, dist31);
+      // 1. 最長リンク(L_max)を特定
+      const L_max = Math.max(a, b, c);
+      if (L_max === 0) return;
+
+      // 2. 実際の面積を計算（ヘロンの公式）
+      const s = (a + b + c) / 2; // 半周長
+      const actualArea = Math.sqrt(s * (s - a) * (s - b) * (s - c));
       
-      if (maxDist === 0) return;
+      // 3. 最大可能面積を計算（最長リンクを1辺とする正三角形の面積）
+      const maxPossibleArea = (Math.sqrt(3) / 4) * Math.pow(L_max, 2);
 
-      const difference = ((maxDist - minDist) / maxDist) * 100;
+      if (maxPossibleArea === 0) return;
 
-      if (difference < self.settings.tolerance) {
+      // 4. 正三角形度パーセンテージを算出
+      const percentage = (actualArea / maxPossibleArea) * 100;
+
+      // 5. 設定された最低パーセンテージをクリアしているかチェック
+      if (percentage >= self.settings.minPercentage) {
         triangles.push({
           portals: [p1, p2, p3],
-          diff: difference,
-          avgDist: (dist12 + dist23 + dist31) / 3
+          percentage: percentage,
+          avgDist: s * 2 / 3
         });
       }
   };
 
   // --- 結果表示 ---
   self.showResults = function(results) {
-    // ★変更点: 選択中項目をハイライトするためのCSSを追加
     const style = `
       <style>
         #eq-results-list li a { display: block; padding: 5px; border-radius: 4px; text-decoration: none; color: #ffce00; border: 1px solid transparent; }
@@ -159,7 +165,6 @@ function wrapper(plugin_info) {
     if (results.length === 0) {
       html += '<p>条件に合う組み合わせは見つかりませんでした。</p>';
     } else {
-      // ★変更点: リスト全体にIDを付与
       html += '<ul id="eq-results-list" style="list-style-type: none; padding-left: 0; margin: 0;">';
       results.forEach((result, index) => {
         const p1 = result.portals[0].options.data;
@@ -167,11 +172,10 @@ function wrapper(plugin_info) {
         const p3 = result.portals[2].options.data;
         const avgDistStr = result.avgDist > 1000 ? `${(result.avgDist/1000).toFixed(2)} km` : `${Math.round(result.avgDist)} m`;
 
-        // ★変更点: 各リスト項目にIDを付与
         html += `
           <li id="eq-result-item-${index}" style="margin-bottom: 2px;">
             <a href="#" onclick="window.plugin.equilateralFinder.drawTriangle(${index}); return false;">
-              <strong>${index + 1}. 誤差: ${result.diff.toFixed(2)}%</strong> (辺長: 約${avgDistStr})<br>
+              <strong>${index + 1}. 正三角形度: ${result.percentage.toFixed(2)}%</strong> (辺長: 約${avgDistStr})<br>
               <div style="font-size: 0.9em; white-space: normal; color: #eee; padding-left: 8px;">
                 - ${p1.title || 'N/A'}<br>
                 - ${p2.title || 'N/A'}<br>
@@ -188,7 +192,7 @@ function wrapper(plugin_info) {
 
     dialog({
       title: `正三角形フィールド候補 (${results.length}件)`,
-      html: style + html, // ★変更点: HTMLの先頭にスタイル定義を追加
+      html: style + html,
       width: 400,
       closeCallback: () => {
         self.drawLayer.clearLayers();
@@ -201,12 +205,9 @@ function wrapper(plugin_info) {
   self.drawTriangle = function(index) {
     if (!self.currentResults || !self.currentResults[index]) return;
 
-    // ★★★ここからハイライト処理★★★
-    // 1. 全てのリスト項目からハイライト用クラスを削除
+    // ハイライト処理
     const allItems = document.querySelectorAll('#eq-results-list li');
     allItems.forEach(item => item.classList.remove('eq-finder-selected'));
-
-    // 2. クリックされたリスト項目にハイライト用クラスを追加
     const selectedItem = document.getElementById(`eq-result-item-${index}`);
     if (selectedItem) {
         selectedItem.classList.add('eq-finder-selected');
@@ -219,6 +220,7 @@ function wrapper(plugin_info) {
 
     self.drawLayer.clearLayers();
 
+    // 三角形を描画
     const triangle = L.polygon(latlngs, {
       color: '#FF0000',
       weight: 2,
@@ -228,15 +230,12 @@ function wrapper(plugin_info) {
     });
     triangle.addTo(self.drawLayer);
 
+    // ポータル位置にマーカーを設置
     portals.forEach(p => {
-        L.circleMarker(p.getLatLng(), {
-            radius: 5,
-            color: 'yellow',
-            fillColor: 'red',
-            fillOpacity: 1
-        }).addTo(self.drawLayer);
+        L.circleMarker(p.getLatLng(), { radius: 5, color: 'yellow', fillColor: 'red', fillOpacity: 1 }).addTo(self.drawLayer);
     });
 
+    // 画面を調整
     window.map.fitBounds(triangle.getBounds().pad(0.2));
   };
 
@@ -261,8 +260,8 @@ function wrapper(plugin_info) {
           <hr>
           <p>検索設定:</p>
           <div style="display: flex; align-items: center; margin-bottom: 10px;">
-            <label for="eq-tolerance" style="width: 120px;">辺長の許容誤差:</label>
-            <input type="number" id="eq-tolerance" value="${self.settings.tolerance}" style="width: 60px;"> %
+            <label for="eq-min-percentage" style="width: 120px;">最低正三角形度:</label>
+            <input type="number" id="eq-min-percentage" value="${self.settings.minPercentage}" min="0" max="100" style="width: 60px;"> %
           </div>
           <div style="display: flex; align-items: center;">
             <label for="eq-maxresults" style="width: 120px;">最大表示件数:</label>
@@ -277,7 +276,7 @@ function wrapper(plugin_info) {
         width: 380,
         buttons: {
           [searchButtonLabel]: function() {
-            self.settings.tolerance = parseFloat($('#eq-tolerance').val());
+            self.settings.minPercentage = parseFloat($('#eq-min-percentage').val());
             self.settings.maxResults = parseInt($('#eq-maxresults').val(), 10);
             localStorage.setItem('equilateralFinder-settings', JSON.stringify(self.settings));
             $(this).dialog('close');
@@ -337,7 +336,13 @@ function wrapper(plugin_info) {
   var setup = function() {
     const savedSettings = localStorage.getItem('equilateralFinder-settings');
     if (savedSettings) {
-      self.settings = JSON.parse(savedSettings);
+        const parsed = JSON.parse(savedSettings);
+        // 古い設定（tolerance）からの移行処理
+        if (parsed.tolerance && !parsed.minPercentage) {
+            parsed.minPercentage = 95; // 古い設定があった場合はデフォルト値に
+            delete parsed.tolerance;
+        }
+        self.settings = { ...self.settings, ...parsed };
     }
     self.drawLayer = new L.FeatureGroup();
     window.map.addLayer(self.drawLayer);
